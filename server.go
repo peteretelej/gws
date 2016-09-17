@@ -1,31 +1,37 @@
-package server
+package gws
 
 import (
 	"html/template"
 	"log"
 	"net/http"
-	"os"
+	"time"
 )
 
 var tmpl = template.Must(template.ParseGlob("tmpl/*.gohtml"))
 
-var listenAddr = os.Getenv("GWSLISTENADDR")
-
 // Serve launches web server listening on listenAddr
-func Serve() {
-	http.HandleFunc("/", handleHome)
-	http.HandleFunc("/about", handleAbout)
-	http.HandleFunc("/favicon.ico", handleFavicon)
+func Serve(listenAddr string) error {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", handleHome)
+	mux.HandleFunc("/about", handleAbout)
+	mux.HandleFunc("/favicon.ico", handleFavicon)
 
 	// serve static files
 	fs := http.FileServer(http.Dir("static"))
-	http.Handle("/static/", http.StripPrefix("/static", fs))
+	mux.Handle("/static/", http.StripPrefix("/static", fs))
 
 	if listenAddr == "" {
 		listenAddr = ":9099"
 	}
-	log.Println("Launching gws on", listenAddr)
-	log.Fatal(http.ListenAndServe(listenAddr, nil))
+	svr := &http.Server{
+		Addr:           listenAddr,
+		Handler:        mux,
+		ReadTimeout:    15 * time.Second,
+		WriteTimeout:   20 * time.Second,
+		MaxHeaderBytes: 1 << 20,
+	}
+
+	return svr.ListenAndServe()
 }
 
 func handleHome(w http.ResponseWriter, r *http.Request) {
