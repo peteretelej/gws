@@ -20,9 +20,6 @@ func Serve(listenAddr string) error {
 	fs := http.FileServer(http.Dir("static"))
 	mux.Handle("/static/", http.StripPrefix("/static", fs))
 
-	if listenAddr == "" {
-		listenAddr = ":9099"
-	}
 	svr := &http.Server{
 		Addr:           listenAddr,
 		Handler:        mux,
