@@ -1,6 +1,16 @@
-{{define "home"}}{{template "head" .}}
+{{define "home"}}{{block "head" .}}<!DOCTYPE html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8">
+		<title>{{.Title}}</title>
+		<meta name="viewport" content="width=device-width,initial-scale=1">
+	</head>
+	{{end}}
 
-<h3>Welcome to {{.Title}}</h3>
+	<h3>Welcome to {{.Title}}</h3>
 
-{{template "foot" .}}
+	{{block "foot" .}}
+	<body>
+</html>
+{{end}}
 {{end}}
