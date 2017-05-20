@@ -1,4 +1,4 @@
-package gws
+package main
 
 import (
 	"compress/gzip"
@@ -15,13 +15,11 @@ import (
 // Using a global tmpl variable caches the template (tree) in-memory for fast use
 var tmpl = template.Must(template.ParseGlob("tmpl/*.gohtml"))
 
-// Serve launches web server listening on listenAddr
-func Serve(listenAddr string) error {
+// NewServer launches web server listening on listenAddr
+func NewServer(listenAddr string) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", handleHome)
 	mux.Handle("/about", GZIP(http.HandlerFunc(handleAbout))) // example middleware usage
-
-	mux.HandleFunc("/favicon.ico", handleFavicon)
 
 	// serve static files
 	fs := http.FileServer(http.Dir("static"))
@@ -36,10 +34,7 @@ func Serve(listenAddr string) error {
 	}
 	// Related article on why you should use a custome http.Server: https://blog.cloudflare.com/exposing-go-on-the-internet/
 
-	return svr.ListenAndServe()
-	// Since ListenAndServe is being immediately returned here, Serve() is not a long running function,
-	// hence do not place go routines here unless properly protected e.g. by sync.WaitGroup
-	// however this returns when the server stops and maybe exactly what is desired
+	return svr
 }
 
 type gzipResponseWriter struct {
@@ -89,8 +84,8 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	data := struct {
-		Title string
-	}{"GWS: Go Web Server"}
+		Title, IP string
+	}{"GWS: Go Web Server", ClientIP(r)}
 	renderTemplate(w, "home", data)
 }
 
@@ -101,10 +96,6 @@ func handleAbout(w http.ResponseWriter, r *http.Request) {
 	}{Title: "About GWS"}
 	data.About = "GWS is a Golang web server"
 	renderTemplate(w, "about", data)
-}
-
-func handleFavicon(w http.ResponseWriter, r *http.Request) {
-	http.ServeFile(w, r, "static/favicon.ico")
 }
 
 func renderTemplate(w http.ResponseWriter, page string, data interface{}) {

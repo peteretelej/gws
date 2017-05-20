@@ -8,8 +8,11 @@
 	{{end}}
 
 	<h3>Welcome to {{.Title}}</h3>
+	<p>Your Public IP Address: {{.IP}}</p>
 
 	{{block "foot" .}}
+	<a href="/">Home</a>
+	<a href="/about">About</a>
 	<body>
 </html>
 {{end}}
