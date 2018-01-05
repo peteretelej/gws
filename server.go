@@ -10,24 +10,31 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/gorilla/csrf"
+	"github.com/gorilla/mux"
 )
 
 // Using a global tmpl variable caches the template (tree) in-memory for fast use
-var tmpl = template.Must(template.ParseGlob("tmpl/*.gohtml"))
+var tmpl *template.Template
 
 // NewServer launches web server listening on listenAddr
 func NewServer(listenAddr string) *http.Server {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", handleHome)
-	mux.Handle("/about", GZIP(http.HandlerFunc(handleAbout))) // example middleware usage
+	rtr := mux.NewRouter()
+	rtr.HandleFunc("/", handleHome)
+	rtr.Handle("/about", GZIP(http.HandlerFunc(handleAbout))) // example middleware usage
 
 	// serve static files
 	fs := http.FileServer(http.Dir("static"))
-	mux.Handle("/static/", GZIP(CACHE(http.StripPrefix("/static", fs)))) // example middleware chaining (GZIP & CACHE)
+	rtr.PathPrefix("/static/").Handler(GZIP(CACHE(http.StripPrefix("/static", fs)))) // example middleware chaining (GZIP & CACHE)
+
+	tmpl = template.Must(template.ParseGlob("tmpl/*.gohtml"))
+
+	protection := csrf.Protect([]byte("_CHANGE_THIS_"))
 
 	svr := &http.Server{
 		Addr:           listenAddr,
-		Handler:        mux,              // You can wrap the handle in CSRF protection (see github.com/gorilla/csrf)
+		Handler:        protection(rtr),  // You can wrap the handle in CSRF protection (see github.com/gorilla/csrf)
 		ReadTimeout:    15 * time.Second, // ReadTimeout and WriteTimeout are essential to avoiding leaked file descriptors by slow or disappearing clients. You may increase this time in case of long running operations
 		WriteTimeout:   20 * time.Second, // Read more here: https://blog.cloudflare.com/the-complete-guide-to-golang-net-http-timeouts/
 		MaxHeaderBytes: 1 << 20,
@@ -66,14 +73,31 @@ func GZIP(next http.Handler) http.Handler {
 // CACHE is the caching middleware
 func CACHE(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Using recommended long time expires (at least a year). Remember to freshen changed assets (e.g rename)
+		if strings.Contains(r.URL.Path, "main.css") {
+			expires := time.Now().Add(48 * time.Hour).UTC().Format("Mon, 02 Jan 2006 15:04:05 MST")
+			expires = strings.Replace(expires, "UTC", "GMT", 1)
+			w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", 48*3600))
+			w.Header().Set("Expires", expires)
+			next.ServeHTTP(w, r)
+			return
+		}
+		expires := time.Now().Add(367 * 24 * time.Hour).UTC().Format("Mon, 02 Jan 2006 15:04:05 MST")
+		expires = strings.Replace(expires, "UTC", "GMT", 1)
 		w.Header().Set("Cache-Control", fmt.Sprintf("public, max-age=%d", 370*24*3600))
-
-		expires := time.Now().Add(367 * 24 * time.Hour).Format("Mon, 02 Jan 2006 15:04:05 MST")
-		// Expires header must be represented in GMT (https://www.w3.org/Protocols/rfc2616/rfc2616-sec14.html#sec14.21)
-		// TODO: This silly little conversion below should be replaced with something better and timezone neutral
-		expires = strings.Replace(expires, "EAT", "GMT", 1) // fix EAT->GMT ( 3hr diff)
 		w.Header().Set("Expires", expires)
+
+		w.Header().Set("Expires", expires)
+		next.ServeHTTP(w, r)
+	})
+}
+
+// AUTH is the authentication middleware
+func AUTH(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLoggedIn(w, r) {
+			http.Redirect(w, r, "/", http.StatusFound)
+			return
+		}
 		next.ServeHTTP(w, r)
 	})
 }
@@ -85,7 +109,15 @@ func handleHome(w http.ResponseWriter, r *http.Request) {
 	}
 	data := struct {
 		Title, IP string
-	}{"GWS: Go Web Server", ClientIP(r)}
+		CSRF      map[string]interface{}
+	}{
+		Title: "GWS: Go Web Server",
+		IP:    ClientIP(r),
+		CSRF:  make(map[string]interface{}), // csrf protection for forms
+	}
+
+	data.CSRF[csrf.TemplateTag] = csrf.TemplateField(r) // in forms use {{.CSRF.csrfField}} for csrf input
+
 	renderTemplate(w, "home", data)
 }
 
@@ -99,14 +131,15 @@ func handleAbout(w http.ResponseWriter, r *http.Request) {
 }
 
 func renderTemplate(w http.ResponseWriter, page string, data interface{}) {
-	secureHeaders(w)
+	SecureHeaders(w)
 	err := tmpl.ExecuteTemplate(w, page, data)
 	if err != nil {
 		log.Print(err.Error())
 	}
 }
 
-func secureHeaders(w http.ResponseWriter) {
+// SecureHeaders adds HTTP Security Headers to http response
+func SecureHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Add("X-Content-Type-Options", "nosniff")
 	w.Header().Add("X-XSS-Protection", "1; mode=block")
